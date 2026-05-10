@@ -1193,8 +1193,12 @@ function dedupeConsecutive(arr) {
   }
   return arr;
 }
-function buildVocabQueue(wrongOnly) {
-  const vl = getVocabList();
+function buildVocabQueue(wrongOnly, source) {
+  source = source || 'all';
+  let vl;
+  if(source === 'original') vl = VOCAB_DATA.slice();
+  else if(source === 'custom') vl = (DB.customVocab||[]).slice();
+  else vl = getVocabList();
   // Exclude archived words from the main quiz pool
   const archived = new Set(DB.archivedVocab || []);
   let pool = wrongOnly
@@ -1260,14 +1264,23 @@ function unarchiveWord(word) {
   saveDB();
 }
 
-function buildGrammarQueue(wrongOnly, ruleFilter) {
-  const all = getGrammarList();
+function unarchiveGram(id) {
+  DB.archivedGram = (DB.archivedGram || []).filter(i => i !== id);
+  saveDB();
+}
+
+function buildGrammarQueue(wrongOnly, ruleFilter, source) {
+  source = source || 'all';
+  let baseList;
+  if(source === 'original') baseList = GRAMMAR_DATA.slice();
+  else if(source === 'custom') baseList = (DB.customGrammar||[]).slice();
+  else baseList = getGrammarList();
   const archivedG = new Set(DB.archivedGram || []);
-  let pool = wrongOnly ? all.filter(g => getGS(g.id).wrong > 0 && !archivedG.has(g.id)) : all.filter(g => !archivedG.has(g.id));
-  if (pool.length === 0) pool = all.filter(g => !archivedG.has(g.id));
-  if (pool.length === 0) pool = all;
+  let pool = wrongOnly ? baseList.filter(g => getGS(g.id).wrong > 0 && !archivedG.has(g.id)) : baseList.filter(g => !archivedG.has(g.id));
+  if (pool.length === 0) pool = baseList.filter(g => !archivedG.has(g.id));
+  if (pool.length === 0) pool = baseList;
   if (ruleFilter) pool = pool.filter(g => g.rule === ruleFilter);
-  if (pool.length === 0) pool = all;
+  if (pool.length === 0) pool = baseList;
   const boostedG = new Set(DB.boostedGram || []);
   let q = [];
   pool.forEach(g => {
@@ -1305,6 +1318,7 @@ function switchTab(tab) {
   else if (tab==='grammar') renderGramStart();
   else if (tab==='review') renderReview();
   else if (tab==='stats') renderStats();
+  else if (tab==='questionbank') renderQuestionBank();
   else if (tab==='notes') renderNotes();
   else if (tab==='paper') renderPaperSection();
   else if (tab==='leaderboard') renderLeaderboard();
@@ -1330,6 +1344,11 @@ function renderHome() {
       </p>
     </div>
     <div class="home-grid">
+      <div class="mode-card" onclick="renderQuestionBank()" style="border-color:rgba(99,102,241,0.35);background:linear-gradient(135deg,rgba(99,102,241,0.08),rgba(139,92,246,0.05))">
+        <div class="mode-icon">📖</div>
+        <div class="mode-title">題庫管理</div>
+        <div class="mode-desc">瀏覽所有單字和文法題<br>管理員可新增或刪除題目</div>
+      </div>
       <div class="mode-card" onclick="renderVocabStart()">
         <div class="mode-icon">📚</div>
         <div class="mode-title">單字訓練</div>
@@ -1450,10 +1469,11 @@ function setAddMsg(text, color){
 }
 
 // ── VOCAB QUIZ ──
-function startVocabMode(wrongOnly, count){
+function startVocabMode(wrongOnly, count, source){
+  S.vocabSource = source || 'all';
   S.tab='vocab';
   document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.tab==='vocab'));
-  let q=buildVocabQueue(wrongOnly);
+  let q=buildVocabQueue(wrongOnly, S.vocabSource);
   const lim = (count&&count!=='all'&&count>0) ? count : (selectedCount!=='all'?selectedCount:null);
   if(lim&&q.length>lim) q=q.slice(0,lim);
   S.vocabQueue=q;
@@ -1652,7 +1672,7 @@ function renderVocabComplete(){ rpgVictory();
   var _vcShowUpload = RPG.active && _vcHpLeft > 0;
   const _vcTotalSec = results.reduce(function(a,r){return a+(r.elapsed||0);},0);
   if(_vcShowUpload){ window._lbPayload = {score:_vcDmg,correct:S.sessionCorrect||0,wrong:S.sessionWrong||0,totalQ:results.length,avgSec:avgSpd,totalSec:_vcTotalSec,mode:'單字',difficulty:RPG.difficulty||'-',won:false,bossHpLeft:_vcHpLeft}; }
-  var _vcUploadHTML = _vcShowUpload ? _lbUploadSection('lbVcBtn','lbVcMsg','⚔️ 上傳英勇榜') : '';
+  var _vcUploadHTML = _vcShowUpload ? ((S.vocabSource||'all')==='all' ? _lbUploadSection('lbVcBtn','lbVcMsg','⚔️ 上傳英勇榜') : '<div style="font-size:0.78rem;color:rgba(255,255,255,0.35);margin-top:10px;padding:8px;background:rgba(255,255,255,0.05);border-radius:8px">⚠️ 非全題庫模式，不計入排行榜</div>') : '';
   const emoji=acc>=90?'🏆':acc>=75?'💪':acc>=60?'📖':'😅';
   const title=acc>=90?'完美！單字全掌握！':acc>=75?'很棒！繼續加油！':acc>=60?'不錯！還有進步空間！':'再多練習！你做得到！';
   main.innerHTML=`
@@ -1690,11 +1710,107 @@ function renderVocabComplete(){ rpgVictory();
     </div>`;
 }
 
+// ── ARCHIVED GRAMMAR QUIZ ──
+function startArchivedGramMode(){
+  S.tab='review';
+  const gl = getGrammarList();
+  const archivedSet = new Set(DB.archivedGram || []);
+  const pool = gl.filter(function(g){ return archivedSet.has(g.id); });
+  if(pool.length===0){
+    main.innerHTML='<div class="card" style="text-align:center"><p>文法複習區目前沒有題目。<br>答題後按「我已熟悉，移到文法複習區」加入。</p><button class="btn btn-secondary" onclick="renderReview()">← 返回</button></div>';
+    return;
+  }
+  S.gramQueue = shuffle(pool.slice());
+  S.gramIdx = 0; S.sessionCorrect = 0; S.sessionWrong = 0;
+  S.sessionResults = [];
+  renderArchivedGramQ();
+}
+
+function renderArchivedGramQ(){
+  if(S.gramIdx >= S.gramQueue.length){ renderArchivedGramComplete(); return; }
+  const q = S.gramQueue[S.gramIdx];
+  const pct = Math.round(S.gramIdx / S.gramQueue.length * 100);
+  const opts = shuffle(q.opts.slice());
+  const sentDisplay = q.sent.replace(/_+/, '<span class="blank">_____</span>');
+  main.innerHTML = `
+    <div class="quiz-header">
+      <span class="quiz-mode-label">📦 文法複習區</span>
+      <span class="score-badge">✅ <span>${S.sessionCorrect}</span> ❌ ${S.sessionWrong}</span>
+    </div>
+    <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
+    <div class="card" style="margin-bottom:14px">
+      <div style="font-size:0.7rem;color:var(--warning);margin-bottom:8px;font-weight:600">📦 文法複習區（答錯即移回題庫）</div>
+      <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:6px">規則 ${q.rule}：${RULE_LABELS[q.rule]||''}</div>
+      <div style="font-size:1.05rem;line-height:1.7;color:var(--text)">${sentDisplay}</div>
+      <button id="gramSpeakBtn" class="speak-btn" style="margin-top:8px" onclick="speakGramSentence('${escQ(q.sent)}','blank')">🔊 聽句子</button>
+    </div>
+    <div class="options">
+      ${opts.map(opt=>`<div class="option" onclick="answerArchivedGram(this,'${escQ(opt)}','${escQ(q.ans)}')">${opt}</div>`).join('')}
+    </div>
+    <div class="feedback" id="fb"></div>
+    <div class="btn-row" id="nextRow" style="display:none">
+      <button class="btn btn-secondary btn-sm" onclick="startArchivedGramMode()">重新開始</button>
+      <button class="btn btn-primary" onclick="nextArchivedGram()">下一題 →</button>
+    </div>`;
+  S.questionStartTime = Date.now();
+}
+
+function answerArchivedGram(el, selected, correct){
+  if(el.classList.contains('answered')) return;
+  document.querySelectorAll('.option').forEach(function(o){ o.classList.add('answered'); });
+  const isOk = selected === correct;
+  const q = S.gramQueue[S.gramIdx];
+  const gs = getGS(q.id);
+  const elapsed = Math.round((Date.now()-(S.questionStartTime||Date.now()))/1000);
+  gs.lastResult = isOk ? 'correct' : 'wrong';
+  if(isOk){
+    el.classList.add('correct');
+    gs.correct++; S.sessionCorrect++;
+    playCorrect();
+    setTimeout(function(){ if(isMotivationOn()) speakChinese('答對了，你好棒！', false); }, 300);
+  } else {
+    el.classList.add('wrong');
+    gs.wrong++; S.sessionWrong++;
+    playWrong();
+    document.querySelectorAll('.option').forEach(function(o){ if(o.textContent.trim()===correct) o.classList.add('show-correct'); });
+    setTimeout(function(){ if(isMotivationOn()) speakChinese('答錯了，你好笨哦', false); }, 300);
+    // Wrong in archive → move back to main quiz
+    unarchiveGram(q.id);
+  }
+  gs.avgTime = gs.avgTime===0 ? elapsed : Math.round(gs.avgTime*0.7+elapsed*0.3);
+  S.sessionResults.push({id:q.id, rule:q.rule, ruleLabel:RULE_LABELS[q.rule]||q.rule, isOk:isOk, elapsed:elapsed});
+  saveDB();
+  const fb = document.getElementById('fb');
+  fb.style.display = 'block';
+  fb.className = 'feedback ' + (isOk ? 'correct' : 'wrong');
+  fb.innerHTML = isOk
+    ? '<div class="feedback-title">🎉 答對了！</div><div class="feedback-body">正確答案：<b style="color:var(--success)">'+correct+'</b></div>'+(q.exp?'<div class="feedback-exp">'+q.exp+'</div>':'')
+    : '<div class="feedback-title">❌ 答錯了！已移回題庫</div><div class="feedback-body">你選了 <span style="color:var(--danger);text-decoration:line-through">'+selected+'</span>　正確：<b style="color:var(--success)">'+correct+'</b></div>'+(q.exp?'<div class="feedback-exp">'+q.exp+'</div>':'');
+  document.getElementById('nextRow').style.display = 'flex';
+}
+
+function nextArchivedGram(){ S.gramIdx++; renderArchivedGramQ(); }
+
+function renderArchivedGramComplete(){
+  const acc = S.sessionCorrect+S.sessionWrong>0 ? Math.round(S.sessionCorrect/(S.sessionCorrect+S.sessionWrong)*100) : 0;
+  main.innerHTML = `
+    <div class="complete-screen">
+      <div class="complete-icon">${acc===100?'🏆':'💪'}</div>
+      <div class="complete-title">${acc===100?'文法複習區全過！':'繼續鞏固！'}</div>
+      <div class="complete-sub">正確率 <b style="color:var(--success)">${acc}%</b>（答錯的題已移回題庫）</div>
+      <div class="btn-row" style="justify-content:center;gap:10px">
+        <button class="btn btn-secondary" onclick="startArchivedGramMode()">再練一輪</button>
+        <button class="btn btn-secondary" onclick="renderReview()">← 返回複習頁</button>
+      </div>
+    </div>`;
+}
+
 // ── GRAMMAR QUIZ ──
-function startGrammarMode(wrongOnly, ruleFilter, count){
+function startGrammarMode(wrongOnly, ruleFilter, count, source){
+  S.gramSource = source || 'all';
   S.tab='grammar';
   document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.tab==='grammar'));
-  let q=buildGrammarQueue(wrongOnly, ruleFilter);
+  let q=buildGrammarQueue(wrongOnly, ruleFilter, S.gramSource);
   const lim=(count&&count!=='all'&&count>0)?count:(selectedCount!=='all'?selectedCount:null);
   if(lim&&q.length>lim) q=q.slice(0,lim);
   S.gramQueue=q;
@@ -2287,7 +2403,7 @@ function renderGramComplete(){ rpgVictory();
   const _gcTotalSec = results.reduce(function(a,r){return a+(r.elapsed||0);},0);
   const _gcAvgSec = results.length>0 ? Math.round(_gcTotalSec/results.length) : 0;
   if(_gcShowUpload){ window._lbPayload = {score:_gcDmg,correct:S.sessionCorrect||0,wrong:S.sessionWrong||0,totalQ:results.length,avgSec:_gcAvgSec,totalSec:_gcTotalSec,mode:'文法',difficulty:RPG.difficulty||'-',won:false,bossHpLeft:_gcHpLeft}; }
-  var _gcUploadHTML = _gcShowUpload ? _lbUploadSection('lbGcBtn','lbGcMsg','⚔️ 上傳英勇榜') : '';
+  var _gcUploadHTML = _gcShowUpload ? ((S.gramSource||'all')==='all' ? _lbUploadSection('lbGcBtn','lbGcMsg','⚔️ 上傳英勇榜') : '<div style="font-size:0.78rem;color:rgba(255,255,255,0.35);margin-top:10px;padding:8px;background:rgba(255,255,255,0.05);border-radius:8px">⚠️ 非全題庫模式，不計入排行榜</div>') : '';
   const ruleMap={};
   results.forEach(r=>{
     if(!ruleMap[r.rule]) ruleMap[r.rule]={rule:r.rule,label:r.ruleLabel||RULE_LABELS[r.rule]||r.rule,ok:0,total:0,totalTime:0};
@@ -2414,10 +2530,227 @@ function renderReview(){
         </div>
         <div class="btn-row" style="margin-top:14px"><button class="btn btn-primary" onclick="startGrammarMode(true)">開始複習錯誤文法</button></div>`}
     </div>
+    <div class="card" style="border-color:rgba(251,191,36,0.4)">
+      <div style="font-weight:600;margin-bottom:4px">📦 文法複習區（已熟悉的文法題）</div>
+      <div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:12px">這裡的題目答錯一次就會自動移回題庫</div>
+      ${(() => {
+        const gl2 = getGrammarList();
+        const archG = DB.archivedGram || [];
+        const archGrams = gl2.filter(function(g){ return archG.includes(g.id); });
+        if(archGrams.length===0) return '<p style="color:var(--text-muted);font-size:0.9rem">還沒有文法題在複習區。答題後按「我已熟悉，移到文法複習區」加入。</p>';
+        return `
+          <div class="word-list" style="max-height:180px;overflow-y:auto">
+            ${archGrams.map(g=>`<div class="word-item"><span style="font-size:0.78rem;max-width:75%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${g.sent.replace(/_+/,'[___]')}</span><button onclick="unarchiveGram(${g.id});renderReview();" style="background:none;border:1px solid var(--border);border-radius:4px;color:var(--text-muted);font-size:0.7rem;padding:1px 6px;cursor:pointer;flex-shrink:0">移回</button></div>`).join('')}
+          </div>
+          <div class="btn-row" style="margin-top:14px">
+            <button class="btn btn-primary" onclick="startArchivedGramMode()">🔄 練習文法複習區（${archGrams.length} 題）</button>
+          </div>`;
+      })()}
+    </div>
   `;
 }
 
 // ── STATS ──
+
+
+// ── 題庫管理 ──────────────────────────────────────────────
+var _qbAdminMode = false;
+var _qbAdminClicks = 0;
+
+function renderQuestionBank(){
+  S.tab = 'questionbank';
+  const origV = VOCAB_DATA.length;
+  const custV = (DB.customVocab||[]).length;
+  const origG = GRAMMAR_DATA.length;
+  const custG = (DB.customGrammar||[]).length;
+
+  function renderQB(){
+    const isAdmin = _qbAdminMode;
+    const vocabRows = [
+      ...VOCAB_DATA.map(function(v,i){ return {v:v, src:'original', idx:i}; }),
+      ...(DB.customVocab||[]).map(function(v,i){ return {v:v, src:'custom', idx:i}; })
+    ];
+    const gramRows = [
+      ...GRAMMAR_DATA.map(function(g,i){ return {g:g, src:'original', idx:i}; }),
+      ...(DB.customGrammar||[]).map(function(g,i){ return {g:g, src:'custom', idx:i}; })
+    ];
+
+    main.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+        <h2 onclick="qbAdminClick()" style="font-size:1.1rem;font-weight:700;cursor:default;user-select:none">
+          📖 題庫管理 ${isAdmin?'<span style="font-size:0.7rem;background:#ef4444;color:#fff;padding:2px 7px;border-radius:5px;vertical-align:middle">管理員</span>':''}
+        </h2>
+        <button class="btn btn-secondary btn-sm" onclick="renderHome()">← 返回</button>
+      </div>
+      ${isAdmin?'<div style="font-size:0.73rem;color:#f87171;margin-bottom:10px;padding:6px 10px;background:rgba(239,68,68,0.1);border-radius:6px">🔐 管理員模式：可刪除自訂題目。原始題庫不可刪除。</div>':'<div style="font-size:0.73rem;color:var(--text-muted);margin-bottom:10px;padding:5px 8px;background:var(--surface2);border-radius:6px">點標題5次可進入管理員模式（允許刪除自訂題目）</div>'}
+
+      <!-- 單字題庫 -->
+      <div class="card" style="margin-bottom:12px">
+        <div style="font-weight:700;margin-bottom:10px;font-size:0.95rem">📚 單字題庫（共 ${origV+custV} 個）
+          <span style="font-size:0.72rem;font-weight:400;color:var(--text-muted)">原始 ${origV} + 自訂 ${custV}</span>
+        </div>
+        <div style="max-height:320px;overflow-y:auto">
+          ${vocabRows.map(function(row){
+            var v=row.v; var isCustom=row.src==='custom'; var idx=row.idx;
+            var vs=getVS(v.w); var acc=vs.correct+vs.wrong>0?Math.round(vs.correct/(vs.correct+vs.wrong)*100):null;
+            var delBtn=isAdmin&&isCustom?`<button onclick="qbDeleteVocab(${idx})" style="background:rgba(239,68,68,0.15);border:1px solid rgba(239,68,68,0.4);color:#f87171;border-radius:4px;padding:1px 5px;cursor:pointer;font-size:0.65rem;flex-shrink:0">🗑️</button>`:'';
+            var srcTag=isCustom?'<span style="font-size:0.6rem;background:rgba(99,102,241,0.2);color:var(--primary-light);border-radius:3px;padding:1px 4px;margin-left:4px">自訂</span>':'';
+            return `<div style="display:flex;align-items:center;gap:8px;padding:5px 2px;border-bottom:1px solid rgba(255,255,255,0.05)">
+              <div style="flex:1;font-size:0.82rem;font-weight:500">${v.w}${srcTag}<span style="font-size:0.75rem;color:var(--text-muted);font-weight:400;margin-left:6px">${v.z}</span></div>
+              <div style="font-size:0.7rem;color:${acc===null?'var(--text-muted)':acc>=80?'var(--success)':acc>=60?'#fbbf24':'var(--danger)'};flex-shrink:0">${acc!==null?acc+'%':'未練'}</div>
+              ${delBtn}
+            </div>`;
+          }).join('')}
+        </div>
+        ${isAdmin?`<button class="btn btn-secondary btn-sm" style="margin-top:10px;width:100%" onclick="renderAddVocab()">＋ 新增單字</button>`:''}
+      </div>
+
+      <!-- 文法題庫 -->
+      <div class="card">
+        <div style="font-weight:700;margin-bottom:10px;font-size:0.95rem">📝 文法題庫（共 ${origG+custG} 題）
+          <span style="font-size:0.72rem;font-weight:400;color:var(--text-muted)">原始 ${origG} + 自訂 ${custG}</span>
+        </div>
+        <div style="max-height:320px;overflow-y:auto">
+          ${gramRows.map(function(row){
+            var g=row.g; var isCustom=row.src==='custom'; var idx=row.idx;
+            var gs=getGS(g.id); var acc=gs.correct+gs.wrong>0?Math.round(gs.correct/(gs.correct+gs.wrong)*100):null;
+            var dc={'1':'#6366f1','2':'#22c55e','3':'#f59e0b','4':'#ef4444','5':'#a855f7','6':'#14b8a6','7':'#f97316','8':'#ec4899','9':'#84cc16','10':'#06b6d4','11':'#eab308','12':'#8b5cf6','13':'#10b981','14':'#f43f5e','15':'#3b82f6'};
+            var rc=dc[g.rule]||'var(--text-muted)';
+            var delBtn=isAdmin&&isCustom?`<button onclick="qbDeleteGram('${g.id}')" style="background:rgba(239,68,68,0.15);border:1px solid rgba(239,68,68,0.4);color:#f87171;border-radius:4px;padding:1px 5px;cursor:pointer;font-size:0.65rem;flex-shrink:0">🗑️</button>`:'';
+            var srcTag=isCustom?'<span style="font-size:0.6rem;background:rgba(99,102,241,0.2);color:var(--primary-light);border-radius:3px;padding:1px 4px;margin-left:4px">自訂</span>':'';
+            return `<div style="display:flex;align-items:center;gap:8px;padding:6px 2px;border-bottom:1px solid rgba(255,255,255,0.05)">
+              <div style="width:20px;height:20px;border-radius:50%;background:${rc}22;display:flex;align-items:center;justify-content:center;font-size:0.65rem;font-weight:700;color:${rc};flex-shrink:0">${g.rule}</div>
+              <div style="flex:1;font-size:0.78rem;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${g.sent.replace(/_+/,'[___]')}${srcTag}</div>
+              <div style="font-size:0.7rem;color:${acc===null?'var(--text-muted)':acc>=80?'var(--success)':acc>=60?'#fbbf24':'var(--danger)'};flex-shrink:0">${acc!==null?acc+'%':'未練'}</div>
+              ${delBtn}
+            </div>`;
+          }).join('')}
+        </div>
+        ${isAdmin?`<button class="btn btn-secondary btn-sm" style="margin-top:10px;width:100%" onclick="renderAddGrammar()">＋ 新增文法題</button>`:''}
+      </div>`;
+  }
+  renderQB();
+}
+
+function qbAdminClick(){
+  _qbAdminClicks++;
+  if(_qbAdminClicks>=5){
+    _qbAdminClicks=0;
+    if(!_qbAdminMode){
+      var pwd=prompt('🔐 管理員密碼：','');
+      if(pwd==='lala6699'){ _qbAdminMode=true; renderQuestionBank(); }
+      else { alert('密碼錯誤'); }
+    } else {
+      _qbAdminMode=false; renderQuestionBank();
+    }
+  }
+}
+
+function qbDeleteVocab(customIdx){
+  var v=(DB.customVocab||[])[customIdx];
+  if(!v) return;
+  if(!confirm('確定刪除單字「'+v.w+'」？')) return;
+  DB.customVocab.splice(customIdx,1);
+  saveDB(); renderQuestionBank();
+}
+
+function qbDeleteGram(id){
+  if(!confirm('確定刪除這道文法題？')) return;
+  DB.customGrammar=(DB.customGrammar||[]).filter(function(g){return g.id!==id;});
+  saveDB(); renderQuestionBank();
+}
+
+function renderAddVocab(){
+  main.innerHTML=`
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
+      <button class="btn btn-secondary btn-sm" onclick="renderQuestionBank()">← 返回</button>
+      <h2 style="font-size:1rem;font-weight:700">➕ 新增單字</h2>
+    </div>
+    <div class="card">
+      <label style="font-size:0.8rem;color:var(--text-muted);display:block;margin-bottom:4px">英文單字</label>
+      <input id="qbVocabW" class="add-input" placeholder="e.g. accomplish" style="width:100%;margin-bottom:10px"/>
+      <label style="font-size:0.8rem;color:var(--text-muted);display:block;margin-bottom:4px">中文釋義</label>
+      <input id="qbVocabZ" class="add-input" placeholder="e.g. 完成；實現" style="width:100%;margin-bottom:10px"/>
+      <label style="font-size:0.8rem;color:var(--text-muted);display:block;margin-bottom:4px">補充說明（可選）</label>
+      <input id="qbVocabN" class="add-input" placeholder="e.g. 名詞：accomplishment" style="width:100%;margin-bottom:12px"/>
+      <button class="btn btn-primary" style="width:100%" onclick="qbAddVocab()">新增到題庫</button>
+      <div id="qbVMsg" style="font-size:0.8rem;margin-top:8px"></div>
+    </div>`;
+}
+
+function qbAddVocab(){
+  var w=(document.getElementById('qbVocabW').value||'').trim();
+  var z=(document.getElementById('qbVocabZ').value||'').trim();
+  var n=(document.getElementById('qbVocabN').value||'').trim();
+  var msg=document.getElementById('qbVMsg');
+  if(!w||!z){msg.style.color='var(--danger)';msg.textContent='請填入英文單字和中文釋義';return;}
+  if(!DB.customVocab) DB.customVocab=[];
+  if(DB.customVocab.some(function(v){return v.w===w;})||VOCAB_DATA.some(function(v){return v.w===w;})){
+    msg.style.color='var(--danger)';msg.textContent='「'+w+'」已存在於題庫中';return;
+  }
+  DB.customVocab.push({w:w,z:z,n:n||undefined});
+  saveDB();
+  msg.style.color='var(--success)';msg.textContent='✅ 已新增「'+w+'」！';
+  document.getElementById('qbVocabW').value='';
+  document.getElementById('qbVocabZ').value='';
+  document.getElementById('qbVocabN').value='';
+}
+
+function renderAddGrammar(){ renderAddGrammar_page(); }
+function renderAddGrammar_page(){
+  main.innerHTML=`
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
+      <button class="btn btn-secondary btn-sm" onclick="renderQuestionBank()">← 返回</button>
+      <h2 style="font-size:1rem;font-weight:700">➕ 新增文法題</h2>
+    </div>
+    <div class="card">
+      <div style="font-size:0.8rem;color:var(--primary-light);margin-bottom:10px">空格請用 <b>_____</b> 標記</div>
+      <label style="font-size:0.8rem;color:var(--text-muted);display:block;margin-bottom:4px">① 句子</label>
+      <textarea id="qbGSent" rows="2" placeholder="The budget _____ by the board." style="width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:10px;border-radius:8px;font-size:0.88rem;resize:vertical;margin-bottom:10px;box-sizing:border-box"></textarea>
+      <label style="font-size:0.8rem;color:var(--text-muted);display:block;margin-bottom:4px">② 正確答案</label>
+      <input id="qbGAns" class="add-input" placeholder="was approved" style="width:100%;margin-bottom:10px"/>
+      <label style="font-size:0.8rem;color:var(--text-muted);display:block;margin-bottom:4px">③ 錯誤選項（至少3個）</label>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:10px">
+        <input id="qbGO2" class="add-input" placeholder="錯誤 B"/>
+        <input id="qbGO3" class="add-input" placeholder="錯誤 C"/>
+        <input id="qbGO4" class="add-input" placeholder="錯誤 D"/>
+      </div>
+      <label style="font-size:0.8rem;color:var(--text-muted);display:block;margin-bottom:4px">④ 規則（數字）</label>
+      <select id="qbGRule" style="width:100%;padding:8px;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:8px;font-size:0.85rem;margin-bottom:10px">
+        ${Object.entries(RULE_LABELS||{}).map(function(e){return '<option value="'+e[0]+'">'+e[0]+'. '+e[1]+'</option>';}).join('')}
+      </select>
+      <label style="font-size:0.8rem;color:var(--text-muted);display:block;margin-bottom:4px">⑤ 解析（可選）</label>
+      <input id="qbGExp" class="add-input" placeholder="e.g. 被動語態：be動詞+過去分詞" style="width:100%;margin-bottom:12px"/>
+      <button class="btn btn-primary" style="width:100%" onclick="qbAddGram()">新增到題庫</button>
+      <div id="qbGMsg" style="font-size:0.8rem;margin-top:8px"></div>
+    </div>`;
+}
+
+function qbAddGram(){
+  var sent=(document.getElementById('qbGSent').value||'').trim();
+  var ans=(document.getElementById('qbGAns').value||'').trim();
+  var o2=(document.getElementById('qbGO2').value||'').trim();
+  var o3=(document.getElementById('qbGO3').value||'').trim();
+  var o4=(document.getElementById('qbGO4').value||'').trim();
+  var rule=document.getElementById('qbGRule').value||'1';
+  var exp=(document.getElementById('qbGExp').value||'').trim();
+  var msg=document.getElementById('qbGMsg');
+  if(!sent||!ans){msg.style.color='var(--danger)';msg.textContent='請填入句子和正確答案';return;}
+  if(!sent.includes('_')){msg.style.color='var(--danger)';msg.textContent='句子中請用 _____ 標記空格';return;}
+  var opts=[ans,o2,o3,o4].filter(function(x){return x.length>0;});
+  if(opts.length<2){msg.style.color='var(--danger)';msg.textContent='至少需要1個錯誤選項';return;}
+  if(!DB.customGrammar) DB.customGrammar=[];
+  var id='cg_qb_'+Date.now();
+  DB.customGrammar.push({id:id,sent:sent,ans:ans,opts:opts,rule:rule,exp:exp||''});
+  saveDB();
+  msg.style.color='var(--success)';msg.textContent='✅ 已新增文法題！';
+  document.getElementById('qbGSent').value='';
+  document.getElementById('qbGAns').value='';
+  document.getElementById('qbGO2').value='';
+  document.getElementById('qbGO3').value='';
+  document.getElementById('qbGO4').value='';
+  document.getElementById('qbGExp').value='';
+}
 
 // ── 弱點客製化測驗 ──────────────────────────────────────
 function startWeaknessGramQuiz(){
@@ -3990,16 +4323,25 @@ function saveSessionProgress(type){
 
 function clearSavedSession(){ DB.savedSession=null; saveDB(); }
 
-function renderVocabStart(){
+function renderVocabStart(source){
   hideRPGBar();
+  source = source || 'all';
   S.tab='vocab';
   document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.tab==='vocab'));
-  const vl=getVocabList();
+  const origCount = VOCAB_DATA.length;
+  const customCount = (DB.customVocab||[]).length;
+  let vl;
+  if(source==='original') vl=VOCAB_DATA.slice();
+  else if(source==='custom') vl=(DB.customVocab||[]).slice();
+  else vl=getVocabList();
   const archived=new Set(DB.archivedVocab||[]);
   const available=vl.filter(v=>!archived.has(v.w)).length;
   const wrongCount=vl.filter(v=>getVS(v.w).wrong>0&&getVS(v.w).streak<3&&!archived.has(v.w)).length;
   const sv=DB.savedSession;
   const hasSave=sv&&sv.type==='vocab'&&sv.idx>0;
+  const srcLabels={'all':'🌐 全題庫（'+origCount+'+'+customCount+'）','original':'📖 原始題庫（'+origCount+'題）','custom':'✏️ 新增題目（'+customCount+'題）'};
+  const lbNote = source!=='all' ? '<div style="font-size:0.75rem;color:var(--warning);margin-top:8px;padding:6px 10px;background:rgba(245,158,11,0.1);border-radius:6px">⚠️ 只有全題庫模式才會記錄排行榜</div>' : '';
+  const emptyNote = vl.length===0 ? '<div class="card" style="text-align:center;color:var(--text-muted)">還沒有新增任何單字，先去<b>新增單字</b>吧！</div>' : '';
 
   main.innerHTML=`
     <div class="start-screen">
@@ -4009,29 +4351,44 @@ function renderVocabStart(){
         <div style="font-size:0.84rem;color:var(--text-muted);margin-bottom:10px">第 ${sv.idx} 題 / 共 ${sv.queueWords.length} 題・✅${sv.correct} ❌${sv.wrong}</div>
         <div class="btn-row">
           <button class="btn btn-primary" onclick="resumeVocabSession()">▶️ 繼續上次</button>
-          <button class="btn btn-secondary btn-sm" onclick="clearSavedSession();renderVocabStart()">重新開始</button>
+          <button class="btn btn-secondary btn-sm" onclick="clearSavedSession();renderVocabStart('${source}')">重新開始</button>
         </div>
       </div>`:''}
-      <div class="card">
-        <div style="font-weight:600;margin-bottom:6px">📚 單字訓練</div>
-        <div style="font-size:0.82rem;color:var(--text-muted);margin-bottom:12px">題庫 ${available} 個（不含複習區）・待加強 ${wrongCount} 個</div>
-        <div style="font-size:0.82rem;color:var(--text-muted);margin-bottom:8px">選題數直接開始練習：</div>
-        <div class="count-row" style="margin-bottom:10px">
-          ${SESSION_COUNTS.map(c=>`<div class="count-btn" data-c="${c}" onclick="startVocabMode(false,${c==='all'?"'all'":c})" style="cursor:pointer">${c==='all'?'全部':c+'題'}</div>`).join('')}
-        </div>
-        ${wrongCount>0?`<button class="btn btn-secondary" style="width:100%" onclick="startVocabMode(true,null)">❌ 只練錯的（${wrongCount}個）</button>`:''}
+      <div style="display:flex;gap:6px;margin-bottom:10px">
+        ${['all','original','custom'].map(s=>`<button onclick="renderVocabStart('${s}')" style="flex:1;padding:8px 4px;border-radius:8px;font-size:0.72rem;font-weight:${source===s?700:400};background:${source===s?'var(--primary)':'var(--surface2)'};color:${source===s?'#fff':'var(--text-muted)'};border:${source===s?'none':'1px solid var(--border)'};cursor:pointer;line-height:1.3">${srcLabels[s]}</button>`).join('')}
       </div>
+      ${emptyNote}
+      ${vl.length>0?`<div class="card">
+        <div style="font-weight:600;margin-bottom:4px">📚 ${srcLabels[source]}</div>
+        <div style="font-size:0.82rem;color:var(--text-muted);margin-bottom:10px">${available} 題可用（不含複習區）・待加強 ${wrongCount} 個</div>
+        <div class="count-row" style="margin-bottom:10px">
+          ${SESSION_COUNTS.map(c=>`<div class="count-btn" data-c="${c}" onclick="startVocabMode(false,${c==='all'?"'all'":c},'${source}')" style="cursor:pointer">${c==='all'?'全部':c+'題'}</div>`).join('')}
+        </div>
+        ${wrongCount>0?`<button class="btn btn-secondary" style="width:100%;margin-bottom:8px" onclick="startVocabMode(true,null,'${source}')">❌ 只練錯的（${wrongCount}個）</button>`:''}
+        ${lbNote}
+      </div>`:''}
     </div>`;
 }
 
-function renderGramStart(){
+function renderGramStart(source){
   hideRPGBar();
+  source = source || 'all';
   S.tab='grammar';
   document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.tab==='grammar'));
-  const gl=getGrammarList();
-  const wrongCount=gl.filter(g=>getGS(g.id).wrong>0).length;
+  const origCount = GRAMMAR_DATA.length;
+  const customCount = (DB.customGrammar||[]).length;
+  let gl;
+  if(source==='original') gl=GRAMMAR_DATA.slice();
+  else if(source==='custom') gl=(DB.customGrammar||[]).slice();
+  else gl=getGrammarList();
+  const archivedG=new Set(DB.archivedGram||[]);
+  const available=gl.filter(g=>!archivedG.has(g.id)).length;
+  const wrongCount=gl.filter(g=>getGS(g.id).wrong>0&&!archivedG.has(g.id)).length;
   const sv=DB.savedSession;
   const hasSave=sv&&sv.type==='grammar'&&sv.idx>0;
+  const srcLabels={'all':'🌐 全題庫（'+origCount+'+'+customCount+'）','original':'📖 原始題庫（'+origCount+'題）','custom':'✏️ 新增題目（'+customCount+'題）'};
+  const lbNote = source!=='all' ? '<div style="font-size:0.75rem;color:var(--warning);margin-top:8px;padding:6px 10px;background:rgba(245,158,11,0.1);border-radius:6px">⚠️ 只有全題庫模式才會記錄排行榜</div>' : '';
+  const emptyNote = gl.length===0 ? '<div class="card" style="text-align:center;color:var(--text-muted)">還沒有新增任何文法題，先去<b>新增文法題</b>吧！</div>' : '';
 
   main.innerHTML=`
     <div class="start-screen">
@@ -4041,21 +4398,25 @@ function renderGramStart(){
         <div style="font-size:0.84rem;color:var(--text-muted);margin-bottom:10px">第 ${sv.idx} 題 / 共 ${(sv.queueIds||sv.queueWords||[]).length} 題・✅${sv.correct} ❌${sv.wrong}</div>
         <div class="btn-row">
           <button class="btn btn-primary" onclick="resumeGramSession()">▶️ 繼續上次</button>
-          <button class="btn btn-secondary btn-sm" onclick="clearSavedSession();renderGramStart()">重新開始</button>
+          <button class="btn btn-secondary btn-sm" onclick="clearSavedSession();renderGramStart('${source}')">重新開始</button>
         </div>
       </div>`:''}
-      <div class="card">
-        <div style="font-weight:600;margin-bottom:6px">📝 文法訓練</div>
-        <div style="font-size:0.82rem;color:var(--text-muted);margin-bottom:12px">題庫 ${gl.length} 題・待加強 ${wrongCount} 題</div>
-        <div style="font-size:0.82rem;color:var(--text-muted);margin-bottom:8px">選題數直接開始練習：</div>
+      <div style="display:flex;gap:6px;margin-bottom:10px">
+        ${['all','original','custom'].map(s=>`<button onclick="renderGramStart('${s}')" style="flex:1;padding:8px 4px;border-radius:8px;font-size:0.72rem;font-weight:${source===s?700:400};background:${source===s?'var(--primary)':'var(--surface2)'};color:${source===s?'#fff':'var(--text-muted)'};border:${source===s?'none':'1px solid var(--border)'};cursor:pointer;line-height:1.3">${srcLabels[s]}</button>`).join('')}
+      </div>
+      ${emptyNote}
+      ${gl.length>0?`<div class="card">
+        <div style="font-weight:600;margin-bottom:4px">📝 ${srcLabels[source]}</div>
+        <div style="font-size:0.82rem;color:var(--text-muted);margin-bottom:10px">${available} 題可用（不含複習區）・待加強 ${wrongCount} 題</div>
         <div class="count-row" style="margin-bottom:10px">
-          ${SESSION_COUNTS.map(c=>`<div class="count-btn" data-c="${c}" onclick="startGrammarMode(false,null,${c==='all'?"'all'":c})" style="cursor:pointer">${c==='all'?'全部':c+'題'}</div>`).join('')}
+          ${SESSION_COUNTS.map(c=>`<div class="count-btn" data-c="${c}" onclick="startGrammarMode(false,null,${c==='all'?"'all'":c},'${source}')" style="cursor:pointer">${c==='all'?'全部':c+'題'}</div>`).join('')}
         </div>
         <div class="btn-row" style="flex-wrap:wrap;gap:8px">
-          ${wrongCount>0?`<button class="btn btn-secondary" onclick="startGrammarMode(true,null,null)">❌ 只練錯的（${wrongCount}）</button>`:''}
+          ${wrongCount>0?`<button class="btn btn-secondary" onclick="startGrammarMode(true,null,null,'${source}')">❌ 只練錯的（${wrongCount}）</button>`:''}
           <button class="btn btn-secondary" onclick="renderRuleSelect()">📋 選特定規則</button>
         </div>
-      </div>
+        ${lbNote}
+      </div>`:''}
     </div>`;
 }
 
@@ -4855,7 +5216,7 @@ function rpgWin(){
         📚 ${_mode}・${_diff} &nbsp;✅ ${_correct} 正確 ❌ ${_wrong} 錯誤 ⏱ 均${_avgSec}s
       </div>
       <div style="margin-top:8px;font-size:2.2rem;font-weight:900;color:#a78bfa">+${_score} 積分</div>
-      ${_lbUploadSection('lbWinBtn','lbWinMsg','🚀 上傳排行榜')}
+      ${(S.vocabSource||'all')==='all'||(S.gramSource||'all')==='all' ? _lbUploadSection('lbWinBtn','lbWinMsg','🚀 上傳排行榜') : '<div style="font-size:0.78rem;color:rgba(255,255,255,0.35);margin-top:10px;padding:8px;background:rgba(255,255,255,0.05);border-radius:8px">⚠️ 非全題庫模式，不計入排行榜</div>'}
       <button onclick="this.closest('.rpg-gameover-overlay').remove()"
         style="margin-top:12px;width:100%;padding:9px;background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.7);border:1px solid rgba(255,255,255,0.2);border-radius:8px;font-size:0.9rem;cursor:pointer">
         繼續
@@ -4889,7 +5250,7 @@ function rpgGameOver(){
         📚 ${_mode}・${_diff} &nbsp;⚔️ 傷害 ${_dmg} &nbsp;✅ ${_correct} 正確 ❌ ${_wrong} 錯誤
       </div>
       <div style="font-size:0.76rem;color:rgba(255,255,255,0.32);margin-top:4px">魔王剩餘 ${_hpLeft} HP</div>
-      ${_lbUploadSection('lbGoBtn','lbGoMsg','⚔️ 上傳英勇榜')}
+      ${(S.vocabSource||'all')==='all'||(S.gramSource||'all')==='all' ? _lbUploadSection('lbGoBtn','lbGoMsg','⚔️ 上傳英勇榜') : '<div style="font-size:0.78rem;color:rgba(255,255,255,0.35);margin-top:10px;padding:8px;background:rgba(255,255,255,0.05);border-radius:8px">⚠️ 非全題庫模式，不計入排行榜</div>'}
       <button onclick="this.closest('.rpg-gameover-overlay').remove()"
         style="margin-top:12px;width:100%;padding:9px;background:#6366f1;color:#fff;border:none;border-radius:8px;font-size:0.9rem;cursor:pointer;font-weight:700">
         再戰一次 💪
@@ -5318,4 +5679,14 @@ function lbShowTab(tab){
     btn.style.borderColor  = active ? colors[t] : 'var(--border)';
     btn.style.fontWeight   = active ? '700' : '600';
   });
-  if(tab==='v
+  if(tab==='vocab'){
+    lbCard.innerHTML = _lbTableHTML(vocab, myNick, false);
+  } else if(tab==='grammar'){
+    lbCard.innerHTML = _lbTableHTML(grammar, myNick, false);
+  } else {
+    lbCard.innerHTML = _lbTableHTML(honor, myNick, true);
+  }
+}
+</script>
+</body>
+</html>                                               
