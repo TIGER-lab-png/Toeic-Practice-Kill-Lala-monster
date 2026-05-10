@@ -69,7 +69,7 @@ echo.
 echo Uploading to GitHub...
 echo (First time: browser will open for GitHub login)
 echo.
-git push -u origin main
+git push -u origin main --force
 
 if not errorlevel 1 (
     echo.
