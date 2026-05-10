@@ -1638,6 +1638,13 @@ function renderVocabComplete(){ rpgVictory();
   const fastCt=results.filter(r=>r.elapsed<=5).length;
   const slowCt=results.filter(r=>r.elapsed>12).length;
   const avgSpd=results.length>0?Math.round(results.reduce((a,r)=>a+r.elapsed,0)/results.length):0;
+  // Honor board upload if boss not killed
+  var _vcHpLeft = Math.round(RPG.active && RPG.enemyHp!=null ? RPG.enemyHp : 100);
+  var _vcDmg = Math.max(0, 100 - _vcHpLeft);
+  var _vcShowUpload = RPG.active && _vcHpLeft > 0;
+  const _vcTotalSec = results.reduce(function(a,r){return a+(r.elapsed||0);},0);
+  if(_vcShowUpload){ window._lbPayload = {score:_vcDmg,correct:S.sessionCorrect||0,wrong:S.sessionWrong||0,totalQ:results.length,avgSec:avgSpd,totalSec:_vcTotalSec,mode:'單字',difficulty:RPG.difficulty||'-',won:false,bossHpLeft:_vcHpLeft}; }
+  var _vcUploadHTML = _vcShowUpload ? _lbUploadSection('lbVcBtn','lbVcMsg','⚔️ 上傳英勇榜') : '';
   const emoji=acc>=90?'🏆':acc>=75?'💪':acc>=60?'📖':'😅';
   const title=acc>=90?'完美！單字全掌握！':acc>=75?'很棒！繼續加油！':acc>=60?'不錯！還有進步空間！':'再多練習！你做得到！';
   main.innerHTML=`
@@ -1666,6 +1673,7 @@ function renderVocabComplete(){ rpgVictory();
         </div>
       </div>`:''}
       ${slowCt>0?`<div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:12px;padding:8px 12px;background:rgba(251,191,36,0.08);border-radius:8px">🐢 有 ${slowCt} 題思考超過12秒，這些單字還需要更多練習。</div>`:''}
+      ${_vcUploadHTML}
       <div class="btn-row" style="justify-content:center;flex-wrap:wrap;gap:10px">
         <button class="btn btn-secondary" onclick="renderVocabStart()">再練一輪</button>
         <button class="btn btn-primary" onclick="startVocabMode(true,selectedCount)">只練錯的字</button>
@@ -2264,6 +2272,14 @@ function captureRuleStats(ruleFilter){
 function renderGramComplete(){ rpgVictory();
   const acc = S.sessionCorrect+S.sessionWrong > 0 ? Math.round(S.sessionCorrect/(S.sessionCorrect+S.sessionWrong)*100) : 0;
   const results=S.sessionResults||[];
+  // Honor board upload if boss not killed
+  var _gcHpLeft = Math.round(RPG.active && RPG.enemyHp!=null ? RPG.enemyHp : 100);
+  var _gcDmg = Math.max(0, 100 - _gcHpLeft);
+  var _gcShowUpload = RPG.active && _gcHpLeft > 0;
+  const _gcTotalSec = results.reduce(function(a,r){return a+(r.elapsed||0);},0);
+  const _gcAvgSec = results.length>0 ? Math.round(_gcTotalSec/results.length) : 0;
+  if(_gcShowUpload){ window._lbPayload = {score:_gcDmg,correct:S.sessionCorrect||0,wrong:S.sessionWrong||0,totalQ:results.length,avgSec:_gcAvgSec,totalSec:_gcTotalSec,mode:'文法',difficulty:RPG.difficulty||'-',won:false,bossHpLeft:_gcHpLeft}; }
+  var _gcUploadHTML = _gcShowUpload ? _lbUploadSection('lbGcBtn','lbGcMsg','⚔️ 上傳英勇榜') : '';
   const ruleMap={};
   results.forEach(r=>{
     if(!ruleMap[r.rule]) ruleMap[r.rule]={rule:r.rule,label:r.ruleLabel||RULE_LABELS[r.rule]||r.rule,ok:0,total:0,totalTime:0};
@@ -2313,6 +2329,7 @@ function renderGramComplete(){ rpgVictory();
         ${weakRules.map(rs=>`<div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:3px">・規則${rs.rule}：${rs.label}（${rs.acc}%）</div>`).join('')}
         <button class="btn btn-secondary btn-sm" style="margin-top:6px" onclick="startGrammarMode(false,'${weakRules[0]?weakRules[0].rule:'1'}',10)">🎯 先練最弱的規則</button>
       </div>`:''}
+      ${_gcUploadHTML}
       <div class="btn-row" style="justify-content:center;flex-wrap:wrap;gap:10px">
         <button class="btn btn-secondary" onclick="renderGramStart()">再練一輪</button>
         <button class="btn btn-primary" onclick="startGrammarMode(true,null,selectedCount)">只練錯的題</button>
@@ -2393,6 +2410,79 @@ function renderReview(){
 }
 
 // ── STATS ──
+
+// ── 弱點客製化測驗 ──────────────────────────────────────
+function startWeaknessGramQuiz(){
+  const gl = getGrammarList();
+  // 計算各規則正確率
+  var ruleMap = {};
+  gl.forEach(function(g){
+    if(!ruleMap[g.rule]) ruleMap[g.rule]={correct:0,wrong:0,qs:[]};
+    var gs=getGS(g.id); ruleMap[g.rule].correct+=gs.correct; ruleMap[g.rule].wrong+=gs.wrong;
+    ruleMap[g.rule].qs.push(g);
+  });
+  // 找出有練習過且正確率<100%的規則
+  var weakRules = Object.entries(ruleMap).filter(function(e){
+    var st=e[1]; return st.correct+st.wrong>0 && st.correct<st.correct+st.wrong;
+  }).map(function(e){
+    var r=e[0], st=e[1];
+    var acc = st.correct/(st.correct+st.wrong);
+    // 正確率越低 → 出越多題：0%→6題 20%→5題 40%→4題 60%→3題 80%→2題 99%→1題
+    var weight = Math.max(1, Math.ceil((1-acc)*6));
+    return {rule:r, acc:acc, weight:weight, qs:st.qs};
+  });
+  if(weakRules.length===0){
+    alert('目前沒有弱點記錄！先多練幾題文法，系統會幫你分析弱點。');
+    return;
+  }
+  // 依權重從各規則抽題
+  var queue = [];
+  weakRules.forEach(function(w){
+    var shuffled = w.qs.slice().sort(function(){return Math.random()-0.5;});
+    queue = queue.concat(shuffled.slice(0, w.weight));
+  });
+  // 洗牌
+  queue = queue.sort(function(){return Math.random()-0.5;});
+  if(queue.length===0){ alert('題庫不足，請先新增更多文法題目。'); return; }
+  // 啟動測驗
+  S.tab='grammar';
+  document.querySelectorAll('.tab').forEach(function(t){t.classList.toggle('active',t.dataset.tab==='grammar');});
+  S.gramQueue=queue; S.gramIdx=0; S.sessionCorrect=0; S.sessionWrong=0;
+  DB.savedSession=null; saveDB();
+  S.sessionResults=[]; S.sessionStartStats=captureRuleStats('');
+  initRPGBattle(queue.length,''); renderGramQ();
+}
+
+function startWeaknessVocabQuiz(){
+  var vl = getVocabList();
+  // 找出曾答錯的單字，依錯誤率排序
+  var weakVocab = vl.filter(function(v){
+    var vs=getVS(v.w); return vs.wrong>0;
+  }).map(function(v){
+    var vs=getVS(v.w);
+    var tot=vs.correct+vs.wrong;
+    var acc=tot>0?vs.correct/tot:0;
+    var weight=Math.max(1,Math.ceil((1-acc)*5));
+    return {v:v, acc:acc, weight:weight};
+  }).sort(function(a,b){return a.acc-b.acc;});
+  if(weakVocab.length===0){
+    alert('目前沒有單字弱點記錄！先多練幾題單字。');
+    return;
+  }
+  // 依權重建立題組
+  var queue = [];
+  weakVocab.forEach(function(w){
+    for(var i=0;i<w.weight&&queue.length<30;i++) queue.push(w.v);
+  });
+  // 洗牌，最多30題
+  queue = queue.sort(function(){return Math.random()-0.5;}).slice(0,30);
+  // 啟動測驗
+  S.tab='vocab';
+  document.querySelectorAll('.tab').forEach(function(t){t.classList.toggle('active',t.dataset.tab==='vocab');});
+  S.vocabQueue=queue; S.vocabIdx=0; S.sessionCorrect=0; S.sessionWrong=0;
+  S.sessionResults=[];
+  initRPGBattle(queue.length,''); renderVocabQ();
+}
 function renderStats(){
   S.tab = 'stats';
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab==='stats'));
@@ -2544,6 +2634,16 @@ function renderStats(){
     <div class="card" style="margin-top:12px">
       <div style="font-weight:600;margin-bottom:12px;font-size:0.9rem">📝 文法規則（由弱到強）</div>
       ${ruleRows || '<p style="color:var(--text-muted);font-size:0.88rem">還沒有文法練習記錄。</p>'}
+    </div>
+
+    <!-- 弱點客製化測驗 -->
+    <div class="card" style="margin-top:12px;background:linear-gradient(135deg,rgba(239,68,68,0.12),rgba(245,158,11,0.08));border-color:rgba(239,68,68,0.35)">
+      <div style="font-weight:700;margin-bottom:6px;font-size:0.95rem;color:#ef4444">🎯 弱點客製化測驗</div>
+      <div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:12px">根據你的答題記錄，自動整理弱點題目。正確率越低的題組出越多題，精準補強你最需要的地方。</div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn btn-danger" style="flex:1;min-width:130px" onclick="startWeaknessGramQuiz()">📝 文法弱點測驗</button>
+        <button class="btn" style="flex:1;min-width:130px;background:#f59e0b;border-color:#f59e0b;color:#fff" onclick="startWeaknessVocabQuiz()">📚 單字弱點測驗</button>
+      </div>
     </div>
 
     <!-- Vocab -->
@@ -4734,7 +4834,8 @@ function rpgWin(){
   const _mode    = S.tab==='grammar'?'文法':'單字';
   const _diff    = RPG.difficulty||'?';
   // 存到全域，讓 lbDoUpload 取用
-  window._lbPayload = {score:_score,correct:_correct,wrong:_wrong,totalQ:_results.length,avgSec:_avgSec,mode:_mode,difficulty:_diff,won:true,bossHpLeft:0};
+  const _totalSec_w = _results.reduce(function(s,r){return s+(r.elapsed||0);},0);
+  window._lbPayload = {score:_score,correct:_correct,wrong:_wrong,totalQ:_results.length,avgSec:_avgSec,totalSec:_totalSec_w,mode:_mode,difficulty:_diff,won:true,bossHpLeft:0};
   setTimeout(()=>{
     const overlay=document.createElement('div');
     overlay.className='rpg-gameover-overlay';
@@ -4767,7 +4868,8 @@ function rpgGameOver(){
   const _dmg     = Math.max(0, 100 - _hpLeft);
   const _mode    = S.tab==='grammar'?'文法':'單字';
   const _diff    = RPG.difficulty||'?';
-  window._lbPayload = {score:_dmg,correct:_correct,wrong:_wrong,totalQ:_results.length,avgSec:_avgSec,mode:_mode,difficulty:_diff,won:false,bossHpLeft:_hpLeft};
+  const _totalSec_g = _results.reduce(function(s,r){return s+(r.elapsed||0);},0);
+  window._lbPayload = {score:_dmg,correct:_correct,wrong:_wrong,totalQ:_results.length,avgSec:_avgSec,totalSec:_totalSec_g,mode:_mode,difficulty:_diff,won:false,bossHpLeft:_hpLeft};
   setTimeout(()=>{
     const overlay=document.createElement('div');
     overlay.className='rpg-gameover-overlay';
@@ -5064,7 +5166,7 @@ function _lbPodium(rows, myNick, isHonor){
           box-shadow:0 0 18px ${glows[pi]}">
           <div style="font-size:1rem;font-weight:900;color:${cols[pi]}">${r.score!=null?r.score:'-'}</div>
           <div style="font-size:0.6rem;color:rgba(255,255,255,0.5)">✅${r.correct!=null?r.correct:0} ❌${r.wrong!=null?r.wrong:0}</div>
-          ${r.avgSec&&!isHonor?`<div style="font-size:0.58rem;color:rgba(255,255,255,0.4)">⏱${r.avgSec}s</div>`:''}
+          ${r.avgSec?`<div style="font-size:0.58rem;color:rgba(255,255,255,0.4)">⏱均${r.avgSec}s／總${r.totalSec!=null?r.totalSec:((r.avgSec||0)*(r.totalQ||0))}s</div>`:''}
         </div>
         ${adminEdit}
       </div>`;
@@ -5085,23 +5187,38 @@ function _lbTableHTML(rows, myNick, isHonor, hideMode){
   // 4名以後的列表
   const rest = rows.slice(3);
   const restHTML = rest.length === 0 ? '' : `
-    <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:10px">
+    <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:8px">
+      <div style="display:flex;align-items:center;padding:3px 4px 6px;font-size:0.62rem;color:var(--text-muted);border-bottom:1px solid rgba(255,255,255,0.08);margin-bottom:2px;letter-spacing:0.02em">
+        <div style="width:26px;flex-shrink:0">#</div>
+        <div style="flex:1">暱稱</div>
+        <div style="width:34px;flex-shrink:0;text-align:center">難度</div>
+        <div style="width:46px;flex-shrink:0;text-align:right">${isHonor?'傷害':'積分'}</div>
+        <div style="width:28px;flex-shrink:0;text-align:right">✅</div>
+        <div style="width:42px;flex-shrink:0;text-align:right">均秒</div>
+        <div style="width:42px;flex-shrink:0;text-align:right">總秒</div>
+        ${_lbAdminMode?'<div style="width:52px;flex-shrink:0"></div>':''}
+      </div>
       ${rest.map(function(r,i){
         const rank = i+4;
         const isMe = r.nickname===myNick;
         const dc = DIFF_COLOR[r.difficulty]||'var(--text-muted)';
-        const key = r._fbKey||''; const nick=(r.nickname||'').replace(/'/g,"\\'");
+        const key = r._fbKey||''; const nick=(r.nickname||'').replace(/'/g,"\'");
+        const totalSec = r.totalSec!=null ? r.totalSec : ((r.avgSec&&r.totalQ) ? r.avgSec*r.totalQ : null);
         const adminBtns = _lbAdminMode ? `
-          <button onclick="lbEditEntry('${key}','${nick}')" style="background:rgba(251,191,36,0.15);border:1px solid rgba(251,191,36,0.4);color:#fbbf24;border-radius:4px;padding:1px 5px;cursor:pointer;font-size:0.7rem;margin-left:4px">✏️</button>
-          <button onclick="lbDeleteEntry('${key}','${nick}')" style="background:rgba(239,68,68,0.15);border:1px solid rgba(239,68,68,0.4);color:#f87171;border-radius:4px;padding:1px 5px;cursor:pointer;font-size:0.7rem;margin-left:2px">🗑️</button>` : '';
-        return `<div style="display:flex;align-items:center;padding:7px 4px;border-bottom:1px solid var(--border);${isMe?'background:rgba(99,102,241,0.1);border-radius:6px;':''}">
-          <div style="width:22px;font-size:0.75rem;color:var(--text-muted);font-weight:600;flex-shrink:0">${rank}</div>
+          <div style="width:52px;flex-shrink:0;display:flex;gap:2px;justify-content:flex-end">
+            <button onclick="lbEditEntry('${key}','${nick}')" style="background:rgba(251,191,36,0.15);border:1px solid rgba(251,191,36,0.4);color:#fbbf24;border-radius:4px;padding:1px 4px;cursor:pointer;font-size:0.65rem">✏️</button>
+            <button onclick="lbDeleteEntry('${key}','${nick}')" style="background:rgba(239,68,68,0.15);border:1px solid rgba(239,68,68,0.4);color:#f87171;border-radius:4px;padding:1px 4px;cursor:pointer;font-size:0.65rem">🗑️</button>
+          </div>` : '';
+        return `<div style="display:flex;align-items:center;padding:6px 4px;border-bottom:1px solid rgba(255,255,255,0.04);${isMe?'background:rgba(99,102,241,0.1);border-radius:6px;':''}">
+          <div style="width:26px;font-size:0.75rem;color:var(--text-muted);font-weight:600;flex-shrink:0">${rank}</div>
           <div style="flex:1;font-size:0.82rem;font-weight:${isMe?700:400};min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
-            ${r.nickname}${isMe?' <span style="font-size:0.65rem;color:var(--primary-light)">(你)</span>':''}
+            ${r.nickname}${isMe?' <span style="font-size:0.62rem;color:var(--primary-light)">(你)</span>':''}
           </div>
-          <div style="font-size:0.65rem;color:${dc};font-weight:600;margin:0 6px;flex-shrink:0">${(r.difficulty||'-').replace('魔王','')}</div>
-          <div style="font-size:0.82rem;font-weight:700;color:${isHonor?'#f87171':'var(--primary-light)'};flex-shrink:0">${r.score!=null?r.score:'-'}</div>
-          <div style="font-size:0.72rem;color:var(--text-muted);margin-left:6px;flex-shrink:0">✅${r.correct!=null?r.correct:0}</div>
+          <div style="width:34px;font-size:0.62rem;color:${dc};font-weight:700;flex-shrink:0;text-align:center">${(r.difficulty||'-').replace('魔王','')}</div>
+          <div style="width:46px;font-size:0.85rem;font-weight:700;color:${isHonor?'#f87171':'var(--primary-light)'};flex-shrink:0;text-align:right">${r.score!=null?r.score:'-'}</div>
+          <div style="width:28px;font-size:0.7rem;color:var(--text-muted);flex-shrink:0;text-align:right">${r.correct!=null?r.correct:'-'}</div>
+          <div style="width:42px;font-size:0.7rem;color:rgba(148,163,184,0.85);flex-shrink:0;text-align:right">${r.avgSec?r.avgSec+'s':'-'}</div>
+          <div style="width:42px;font-size:0.7rem;color:rgba(148,163,184,0.55);flex-shrink:0;text-align:right">${r.totalSec!=null?r.totalSec+'s':(totalSec?totalSec+'s':'-')}</div>
           ${adminBtns}
         </div>`;
       }).join('')}
