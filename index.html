@@ -4,6 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>🎯 多益個人弱點訓練系統</title>
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-ZXWYF5P9ED"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-ZXWYF5P9ED');
+</script>
 <style>
 :root {
   --bg: #0f172a;
@@ -5310,11 +5318,4 @@ function lbShowTab(tab){
     btn.style.borderColor  = active ? colors[t] : 'var(--border)';
     btn.style.fontWeight   = active ? '700' : '600';
   });
-  if(tab==='vocab')        lbCard.innerHTML = _lbTableHTML(vocab,   myNick, false, true);
-  else if(tab==='grammar') lbCard.innerHTML = _lbTableHTML(grammar, myNick, false, true);
-  else                     lbCard.innerHTML = _lbTableHTML(honor,   myNick, true,  false);
-}
-
-</script>
-</body>
-</html>
+  if(tab==='v
